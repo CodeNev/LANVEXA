@@ -19,17 +19,34 @@ const API = {
     if (token) headers.Authorization = 'Bearer ' + token;
 
     const response = await fetch(this.base + path, Object.assign({}, options, { headers }));
-    const text = await response.text();
-    const data = text ? JSON.parse(text) : null;
+    const raw = await response.text();
+
+    let data = null;
+    if (raw) {
+      try {
+        data = JSON.parse(raw);
+      } catch (parseError) {
+        const preview = raw.slice(0, 120).replace(/\s+/g, ' ');
+        throw new Error('Server error ' + response.status + ': ' + preview);
+      }
+    }
 
     if (!response.ok) {
-      const message = (data && data.detail) || 'request_failed';
+      const message = (data && data.detail) || (data && data.error) || 'request_failed';
       throw new Error(message);
     }
     return data;
   },
 
-  get(path) { return this.request(path); },
-  post(path, body) { return this.request(path, { method: 'POST', body: JSON.stringify(body) }); },
-  del(path) { return this.request(path, { method: 'DELETE' }); },
+  get(path) {
+    return this.request(path);
+  },
+
+  post(path, body) {
+    return this.request(path, { method: 'POST', body: JSON.stringify(body) });
+  },
+
+  del(path) {
+    return this.request(path, { method: 'DELETE' });
+  },
 };
