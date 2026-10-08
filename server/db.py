@@ -45,9 +45,19 @@ CREATE INDEX IF NOT EXISTS idx_activity_user ON activity_logs(user_id);
 """
 
 
+def _needs_ssl(url: str) -> bool:
+    return "rlwy.net" in url or "railway" in url or "sslmode=require" in url
+
+
 async def init_db():
     global pool
-    pool = await asyncpg.create_pool(settings.database_url, min_size=1, max_size=10)
+    ssl_arg = "require" if _needs_ssl(settings.database_url) else None
+    pool = await asyncpg.create_pool(
+        settings.database_url,
+        min_size=1,
+        max_size=10,
+        ssl=ssl_arg,
+    )
     async with pool.acquire() as conn:
         await conn.execute(SCHEMA)
 
