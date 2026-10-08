@@ -39,8 +39,14 @@ def generate_tunnel_token() -> str:
     return "lvt_" + secrets.token_urlsafe(32)
 
 
-def generate_public_host() -> str:
-    return "play-" + secrets.token_hex(3) + "." + settings.public_domain
+async def allocate_public_port() -> int:
+    async with db_module.get_pool().acquire() as conn:
+        rows = await conn.fetch("SELECT public_port FROM tunnels")
+    used = {r["public_port"] for r in rows}
+    for candidate in range(settings.port_range_start, settings.port_range_end + 1):
+        if candidate not in used:
+            return candidate
+    raise HTTPException(status_code=503, detail="no_free_port")
 
 
 async def current_user(
@@ -55,9 +61,7 @@ async def current_user(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid_token")
 
     async with db_module.get_pool().acquire() as conn:
-        row = await conn.fetchrow(
-            "SELECT id, username FROM users WHERE id = $1", user_id
-        )
+        row = await conn.fetchrow("SELECT id, username FROM users WHERE id = $1", user_id)
     if row is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="user_not_found")
     return dict(row)
