@@ -1,4 +1,3 @@
-import asyncio
 import contextlib
 import json
 import logging
@@ -15,7 +14,6 @@ from pydantic import BaseModel, Field
 from . import auth as auth_module
 from . import db as db_module
 from .config import settings
-from .relay import allocate_port, relay
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 log = logging.getLogger("lanvexa")
@@ -38,22 +36,8 @@ async def broadcast(event):
 @asynccontextmanager
 async def lifespan(_app):
     await db_module.init_db()
-
-    control_server = None
-    if settings.relay_enabled:
-        control_server = await relay.start_control()
-        log.info("relay control listening on %s:%s", settings.relay_host, settings.relay_control_port)
-    else:
-        log.info("relay control disabled")
-
-    log.info("Lanvexa is ready on port %s", settings.port)
-
+    log.info("Lanvexa ready on port %s", settings.port)
     yield
-
-    if control_server is not None:
-        control_server.close()
-        with contextlib.suppress(Exception):
-            await control_server.wait_closed()
     await db_module.close_db()
 
 
@@ -84,7 +68,6 @@ class LoginBody(BaseModel):
 class TunnelBody(BaseModel):
     name: str = Field(min_length=1, max_length=64)
     game: str = Field(min_length=1, max_length=64)
-    protocol: str = "tcp"
     local_host: str = Field(default="127.0.0.1", max_length=128)
     local_port: int = Field(ge=1, le=65535)
 
@@ -153,28 +136,24 @@ async def list_tunnels(user=Depends(auth_module.current_user)):
 
 @app.post("/api/tunnels")
 async def create_tunnel(body: TunnelBody, user=Depends(auth_module.current_user)):
-    if body.protocol not in ("tcp", "udp", "tcp+udp"):
-        raise HTTPException(status_code=400, detail="invalid_protocol")
-
-    port = await allocate_port()
     tunnel_id = auth_module.generate_tunnel_id()
     token = auth_module.generate_tunnel_token()
     public_host = auth_module.generate_public_host()
+    public_port = 40000 + (hash(tunnel_id) % 10000)
 
     async with db_module.get_pool().acquire() as conn:
         await conn.execute(
             """INSERT INTO tunnels
                (id, user_id, name, game, protocol, local_host, local_port, public_host, public_port, token, status)
-               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'stopped')""",
+               VALUES ($1,$2,$3,$4,'tcp',$5,$6,$7,$8,$9,'stopped')""",
             tunnel_id,
             user["id"],
             body.name,
             body.game,
-            body.protocol,
             body.local_host,
             body.local_port,
             public_host,
-            port,
+            public_port,
             token,
         )
         row = await conn.fetchrow("SELECT * FROM tunnels WHERE id = $1", tunnel_id)
@@ -205,8 +184,6 @@ async def delete_tunnel(tunnel_id: str, user=Depends(auth_module.current_user)):
         if row is None:
             raise HTTPException(status_code=404, detail="not_found")
         await conn.execute("DELETE FROM tunnels WHERE id = $1", tunnel_id)
-
-    await relay.teardown_tunnel(tunnel_id)
     await db_module.log_activity(user["id"], tunnel_id, "tunnel.deleted")
     await broadcast({"type": "tunnel.deleted", "tunnel_id": tunnel_id})
     return {"ok": True}
