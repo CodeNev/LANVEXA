@@ -1,4 +1,3 @@
-import contextlib
 import json
 import logging
 from contextlib import asynccontextmanager
@@ -36,7 +35,7 @@ async def broadcast(event):
 @asynccontextmanager
 async def lifespan(_app):
     await db_module.init_db()
-    log.info("Lanvexa ready on port %s", settings.port)
+    log.info("Lanvexa API ready on port %s", settings.port)
     yield
     await db_module.close_db()
 
@@ -138,8 +137,8 @@ async def list_tunnels(user=Depends(auth_module.current_user)):
 async def create_tunnel(body: TunnelBody, user=Depends(auth_module.current_user)):
     tunnel_id = auth_module.generate_tunnel_id()
     token = auth_module.generate_tunnel_token()
-    public_host = auth_module.generate_public_host()
-    public_port = 40000 + (hash(tunnel_id) % 10000)
+    public_host = settings.relay_public_host
+    public_port = await auth_module.allocate_public_port()
 
     async with db_module.get_pool().acquire() as conn:
         await conn.execute(
