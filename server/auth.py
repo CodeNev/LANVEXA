@@ -2,24 +2,27 @@ import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
+import bcrypt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
-from passlib.context import CryptContext
 
 from .config import settings
 from . import db as db_module
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 bearer_scheme = HTTPBearer(auto_error=False)
 
 
 def hash_password(value: str) -> str:
-    return pwd_context.hash(value)
+    salt = bcrypt.gensalt(rounds=10)
+    return bcrypt.hashpw(value.encode("utf-8"), salt).decode("utf-8")
 
 
 def verify_password(value: str, hashed: str) -> bool:
-    return pwd_context.verify(value, hashed)
+    try:
+        return bcrypt.checkpw(value.encode("utf-8"), hashed.encode("utf-8"))
+    except (ValueError, TypeError):
+        return False
 
 
 def create_token(user_id: int) -> str:
@@ -53,7 +56,7 @@ async def current_user(
 
     async with db_module.get_pool().acquire() as conn:
         row = await conn.fetchrow(
-            "SELECT id, username, created_at FROM users WHERE id = $1", user_id
+            "SELECT id, username FROM users WHERE id = $1", user_id
         )
     if row is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="user_not_found")
