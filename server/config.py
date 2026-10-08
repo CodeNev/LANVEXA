@@ -10,8 +10,13 @@ class Settings(BaseSettings):
 
     public_domain: str = "localhost"
 
-    relay_public_host: str = "localhost"
+    relay_host: str = "0.0.0.0"
+    relay_control_port: int = 7000
+    relay_public_host: str = "127.0.0.1"
     relay_public_port: int = 7000
+
+    port_range_start: int = 40000
+    port_range_end: int = 50000
 
     port: int = 8000
 
@@ -19,10 +24,23 @@ class Settings(BaseSettings):
         env_file = ".env"
         extra = "ignore"
 
-    @field_validator("relay_public_port", "port", mode="before")
+    @field_validator(
+        "relay_control_port",
+        "relay_public_port",
+        "port",
+        "port_range_start",
+        "port_range_end",
+        mode="before",
+    )
     @classmethod
     def parse_int(cls, value, info):
-        defaults = {"relay_public_port": 7000, "port": 8000}
+        defaults = {
+            "relay_control_port": 7000,
+            "relay_public_port": 7000,
+            "port": 8000,
+            "port_range_start": 40000,
+            "port_range_end": 50000,
+        }
         if value is None or value == "":
             return defaults[info.field_name]
         try:
