@@ -7,7 +7,8 @@ from pathlib import Path
 
 import uvicorn
 from fastapi import Depends, FastAPI, HTTPException, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -37,16 +38,37 @@ async def broadcast(event):
 @asynccontextmanager
 async def lifespan(_app):
     await db_module.init_db()
-    control_server = await relay.start_control()
+
+    control_server = None
+    if settings.relay_enabled:
+        control_server = await relay.start_control()
+        log.info("relay control listening on %s:%s", settings.relay_host, settings.relay_control_port)
+    else:
+        log.info("relay control disabled")
+
     log.info("Lanvexa is ready on port %s", settings.port)
+
     yield
-    control_server.close()
-    with contextlib.suppress(Exception):
-        await control_server.wait_closed()
+
+    if control_server is not None:
+        control_server.close()
+        with contextlib.suppress(Exception):
+            await control_server.wait_closed()
     await db_module.close_db()
 
 
 app = FastAPI(title="Lanvexa", lifespan=lifespan)
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request, exc):
+    log.exception("unhandled error on %s: %s", request.url.path, exc)
+    return JSONResponse(status_code=500, content={"detail": "internal_error"})
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request, exc):
+    return JSONResponse(status_code=422, content={"detail": "invalid_request"})
 
 
 class RegisterBody(BaseModel):
